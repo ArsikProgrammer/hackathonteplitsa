@@ -1,0 +1,13 @@
+week,date,city,crop,taraz_price,mean_price,import_m,tashkent_T,kzt_rub,holiday
+1,2024-01-04,Taraz,cucumber,520,560,12.5,-2.0,5.1,1
+2,2024-01-11,Taraz,cucumber,530,565,13.0,-1.0,5.2,0
+3,2024-01-18,Taraz,cucumber,510,555,14.2,2.0,5.1,0
+4,2024-01-25,Taraz,cucumber,495,550,15.8,6.0,5.0,0
+5,2024-02-01,Taraz,cucumber,470,540,18.5,10.0,5.0,0
+6,2024-02-08,Taraz,cucumber,450,530,22.0,14.0,4.9,0
+7,2024-02-15,Taraz,cucumber,430,520,25.5,18.0,4.9,0
+8,2024-02-22,Taraz,cucumber,420,515,27.0,21.0,4.8,0
+9,2024-02-29,Taraz,cucumber,415,510,28.5,23.0,4.8,0
+10,2024-03-07,Taraz,cucumber,410,505,29.0,24.0,4.9,0
+11,2024-03-14,Taraz,cucumber,405,500,28.0,22.0,5.0,0
+12,2024-03-21,Taraz,cucumber,400,495,26.5,20.0,5.0,1
