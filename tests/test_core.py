@@ -41,7 +41,7 @@ def t_edge():
     from freeze import hdd_deficit, freeze_risk
     from calibrate import calibrate_UN
     assert hdd_deficit([]) == 0.0
-    assert freeze_risk(0) == 0.063
+    assert freeze_risk(0) == 0.047  # B=-3.0: p(0)=0.047 (полевая калибровка требуется)
     assert freeze_risk(10000) == 1.0
     r = calibrate_UN([{"t_in": 18, "t_out": 10, "v_gas_m3": 100, "hours": 12}] * 3, 2440, 6000)
     assert r["status"] == "need>=7 nights"

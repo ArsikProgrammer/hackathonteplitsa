@@ -18,14 +18,14 @@ try:
     from .freeze import hdd_deficit, freeze_risk, freeze_loss, estimate_t_in_no_heat
     from .config import (T_CRIT_CUCUMBER, T_CRIT_TOMATO, SAFETY_MARGIN_C, BOILER_KW_MAX,
                          FREEZE_A, FREEZE_B, SCREEN_FACTOR, SCREEN_COST_PER_NIGHT,
-                         SCREEN_WORK_PER_NIGHT)
+                         SCREEN_WORK_PER_NIGHT, SOIL_HA_W_PER_K)
 except ImportError:
     from dynamics import heat_need_series, simulate_no_heat
     from fuels import fuel_need, price_per_kwh, boiler_check
     from freeze import hdd_deficit, freeze_risk, freeze_loss, estimate_t_in_no_heat
     from config import (T_CRIT_CUCUMBER, T_CRIT_TOMATO, SAFETY_MARGIN_C, BOILER_KW_MAX,
                         FREEZE_A, FREEZE_B, SCREEN_FACTOR, SCREEN_COST_PER_NIGHT,
-                        SCREEN_WORK_PER_NIGHT)
+                        SCREEN_WORK_PER_NIGHT, SOIL_HA_W_PER_K)
 
 T_CRIT = {"cucumber": T_CRIT_CUCUMBER, "tomato": T_CRIT_TOMATO}
 
@@ -77,10 +77,22 @@ def optimize_night(night_rows, length=50.0, width=30.0, height=4.0, material="fi
         "P3_screen": [float(t_target)] * n,
     }
     screen = {"P1_flat": 1.0, "P2_econight": 1.0, "P3_screen": float(SCREEN_FACTOR)}
+
+    # почва: прогоняем simulate_no_heat чтобы оценить T_soil профиль
+    # если T_soil > T_target — почва отдаёт тепло, вычитаем из Q_need
+    try:
+        soil_rows = simulate_no_heat(night_rows, length, width, height, material)
+        hA = float(SOIL_HA_W_PER_K) * (length * width) / 1500.0
+        soil_gains = [max(0.0, hA * (r["T_soil"] - float(t_target))) for r in soil_rows]
+        avg_soil_gain = sum(soil_gains) / len(soil_gains) if soil_gains else 0.0
+    except Exception:
+        avg_soil_gain = 0.0
+
     options = []
     for name, targ in profiles.items():
         need = heat_need_series(night_rows, targ, length, width, height, material,
-                                u_screen_factor=screen[name])
+                                u_screen_factor=screen[name],
+                                soil_gain_W=avg_soil_gain)
         q_peak = max([q["Q_W"] for q in need]) / 1000.0 if need else 0.0
         e_kwh = sum(q["Q_W"] for q in need) / 1000.0  # dt=1ч
         chk = boiler_check(q_peak, boiler_kw_max)
