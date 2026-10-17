@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.cache/
+*.json
+.env
+.DS_Store
+tmp/
+.idea/
+data/bns_test_*.xlsx
