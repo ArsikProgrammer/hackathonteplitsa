@@ -11,7 +11,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
 
 L, W, H = 50.0, 30.0, 4.0
 
-fig = plt.figure(figsize=(12, 7), dpi=160)
+fig = plt.figure(figsize=(13, 7.2), dpi=200)
 ax = fig.add_subplot(111, projection='3d')
 fig.patch.set_facecolor('#0E0E10')
 ax.set_facecolor('#0E0E10')
@@ -77,5 +77,5 @@ ax.tick_params(colors='#6E7278', labelsize=8)
 ax.view_init(elev=20, azim=-58)
 ax.legend(loc='upper left', fontsize=9, frameon=False, labelcolor='#FFFFFF')
 fig.tight_layout()
-fig.savefig('assets/greenhouse3d.png', bbox_inches='tight', facecolor='#0E0E10')
+fig.savefig('assets/greenhouse3d.png', bbox_inches='tight', facecolor='#0A0C16')
 print('saved assets/greenhouse3d.png')

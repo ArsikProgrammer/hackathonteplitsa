@@ -20,97 +20,80 @@ st.set_page_config(page_title="Теплица 0.15 га — автопилот",
 
 st.markdown("""
 <style>
+@keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes glowPulse { 0%,100% { text-shadow: 0 0 18px rgba(255,138,91,.40); } 50% { text-shadow: 0 0 36px rgba(255,138,91,.85); } }
+.stApp {
+    background:
+        radial-gradient(900px 520px at 88% -8%, rgba(255,138,91,.16), transparent 60%),
+        radial-gradient(820px 520px at -12% 18%, rgba(80,190,255,.13), transparent 60%),
+        radial-gradient(760px 760px at 50% 112%, rgba(160,90,255,.11), transparent 60%),
+        linear-gradient(135deg, #0a0c16 0%, #10142a 46%, #171026 100%);
+    background-attachment: fixed;
+    color: #EDEFF3;
+}
+.hero-title {
+    font-size: 2.6rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 2px;
+    background: linear-gradient(92deg, #FFB08A 0%, #FFD9A8 35%, #9BE8D8 70%, #8AB8FF 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: fadeUp .6s ease both;
+}
+.hero-sub { font-size: 1.05rem; color: #A7AEBE; margin: 2px 0 20px 0; animation: fadeUp .7s ease both; }
 .metric-card {
-    background: linear-gradient(180deg, #1A1A1E 0%, #121214 100%);
-    border: 1px solid #2A2A2E;
-    border-radius: 16px;
-    padding: 18px 20px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    background: linear-gradient(160deg, rgba(255,255,255,.075), rgba(255,255,255,.028));
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,.10);
+    border-radius: 22px; padding: 20px 24px;
+    box-shadow: 0 18px 44px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.08);
+    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+    animation: fadeUp .55s ease both;
 }
-.metric-card .label {
-    font-size: 0.9rem;
-    color: #9AA0A6;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 6px;
+.metric-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(255,176,138,.45);
+    box-shadow: 0 26px 60px rgba(255,138,91,.15), 0 18px 44px rgba(0,0,0,.5);
 }
-.metric-card .value {
-    font-size: 2.1rem;
-    font-weight: 700;
-    color: #FFFFFF;
-    line-height: 1.1;
-}
-.action-heat { color: #FF6B35; }
-.action-hold { color: #4CAF50; }
-.action-sell { color: #9C27B0; }
-.section-title {
-    font-size: 1.35rem;
-    font-weight: 600;
-    color: #FFFFFF;
-    margin-top: 30px;
-    margin-bottom: 16px;
-    letter-spacing: -0.02em;
-}
+.metric-card .label { font-size: .82rem; color: #9AA3B8; text-transform: uppercase; letter-spacing: .09em; margin-bottom: 8px; }
+.metric-card .value { font-size: 2.15rem; font-weight: 750; color: #FFFFFF; line-height: 1.12; }
+.metric-card .sub { font-size: .95rem; color: #A7AEBE; margin-top: 8px; }
+.action-heat { background: linear-gradient(92deg,#FF8A5B,#FFC56E); -webkit-background-clip: text; background-clip: text; color: transparent; animation: glowPulse 3.2s ease-in-out infinite; }
+.action-hold { background: linear-gradient(92deg,#7CE0C3,#5BB8FF); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.action-sell { background: linear-gradient(92deg,#C77DFF,#FF9CEE); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.action-warn { background: linear-gradient(92deg,#FFD166,#FF9F68); -webkit-background-clip: text; background-clip: text; color: transparent; font-weight: 650; }
 .decision-box {
-    background: linear-gradient(180deg, #1A1A1E 0%, #121214 100%);
-    border: 1px solid #2A2A2E;
-    border-radius: 20px;
-    padding: 28px 32px;
-    margin-top: 24px;
-    box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+    background: linear-gradient(160deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,.11);
+    border-radius: 24px; padding: 28px 32px; margin-top: 24px;
+    box-shadow: 0 22px 56px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.09);
+    animation: fadeUp .6s ease both;
 }
-.decision-box h2 {
-    font-size: 1.6rem;
-    margin: 0 0 12px 0;
-    color: #FFFFFF;
-}
-.decision-box .big {
-    font-size: 3.4rem;
-    font-weight: 800;
-    line-height: 1.05;
-}
-.decision-box .sub {
-    font-size: 1.05rem;
-    color: #9AA0A6;
-    margin-top: 10px;
-}
-.stTabs [data-baseweb="tab-list"] {
-    gap: 8px;
-    background: transparent;
-}
+.decision-box h2 { font-size: 1.6rem; margin: 0 0 12px 0; color: #FFFFFF; }
+.decision-box .big { font-size: 3.2rem; font-weight: 800; line-height: 1.05;
+    background: linear-gradient(92deg,#FFB08A,#FFD9A8); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.decision-box .sub { font-size: 1.02rem; color: #A7AEBE; margin-top: 10px; }
+.stTabs [data-baseweb="tab-list"] { gap: 10px; background: transparent; }
 .stTabs [data-baseweb="tab"] {
-    background: #121214;
-    border: 1px solid #2A2A2E;
-    border-radius: 10px;
-    color: #9AA0A6;
-    font-weight: 500;
-    padding: 10px 20px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09);
+    border-radius: 14px; color: #B9C0D0; font-weight: 550; padding: 10px 22px;
+    transition: all .22s ease;
 }
+.stTabs [data-baseweb="tab"]:hover { border-color: rgba(255,176,138,.5); color: #FFD9C4; }
 .stTabs [aria-selected="true"] {
-    background: #FF6B35;
-    color: #FFFFFF;
-    border-color: #FF6B35;
-}
-.hero-sub {
-    font-size: 1.05rem;
-    color: #9AA0A6;
-    margin: -8px 0 18px 0;
+    background: linear-gradient(92deg, #FF8A5B, #FFB08A);
+    color: #14161F; border-color: transparent;
+    box-shadow: 0 8px 26px rgba(255,138,91,.35);
 }
 div.stButton > button {
-    background: #121214;
-    border: 1px solid #2A2A2E;
-    border-radius: 10px;
-    color: #FFFFFF;
-    font-weight: 500;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 12px; color: #F0F2F7; font-weight: 550; transition: all .2s ease;
 }
-div.stButton > button:hover {
-    border-color: #FF6B35;
-}
+div.stButton > button:hover { border-color: #FF8A5B; box-shadow: 0 6px 20px rgba(255,138,91,.25); transform: translateY(-1px); }
+div[data-testid="stImage"] img { border-radius: 20px; box-shadow: 0 24px 60px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08); }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="section-title">Теплица 0.15 га — ночной автопилот</div>', unsafe_allow_html=True)
-st.caption("Ночь: погода → тепло → деньги → решение. Неделя: цены + импорт → везти или держать.")
+st.markdown('<div class="hero-title">Теплица 0.15 га — ночной автопилот</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-sub">Ночь: погода → тепло → деньги → решение. Неделя: ML-прогноз цены → ждать или везти. Логистика: куда везти и на чём.</div>', unsafe_allow_html=True)
 
 with st.sidebar:
     st.markdown('<div class="section-title" style="margin-top:0">Паспорт теплицы</div>', unsafe_allow_html=True)
@@ -128,6 +111,11 @@ with st.sidebar:
     readiness = st.slider("Готовность культуры", 0.0, 1.0, 0.85)
     screen_cost = st.number_input("Цена ночи экрана, тг", value=4000.0, step=100.0)
     screen_owned = st.checkbox("Экран уже куплен (только работа)", value=False)
+    st.markdown("### Урожай")
+    yld = st.number_input("Урожайность, кг/м²", value=YIELD_KG_M2, step=0.5)
+    harvest_kg = st.number_input("Сбор, кг/день", value=300.0, step=10.0, min_value=0.0)
+    shelf_days = st.number_input("Срок хранения, дней", value=5.0, step=1.0, min_value=1.0)
+    marketable = st.slider("Товарный вид, %", 50, 100, 90)
     fact_gas = st.number_input("Фактический газ за ночь, м³ (0 — не мерил)",
                                value=0.0, step=1.0, min_value=0.0)
     farmer_text = st.text_input("Слова фермера (топливо/котёл/культура)", "")
@@ -152,14 +140,15 @@ t_crit = T_CRIT_CUCUMBER if crop == "cucumber" else T_CRIT_TOMATO
 try:
     fc = forecast_with_spread()
     base_rows = fc["base"]
-    weather_note = f"погода: {fc['source']}"
+    weather_note = ("погода: ансамбль open-meteo" if fc["source"] == "ensemble"
+                    else "погода: open-meteo, одиночный прогноз")
 except Exception as e:
     weather_note = f"нет сети — демо-ночь −5°C ({type(e).__name__})"
     base_rows = [{"T": -5.0, "wind": 3.0, "RH": 85.0,
                   "time": f"2024-03-14T{h:02d}:00"} for h in (18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5)]
 res = optimize_night(base_rows, L, W, H, mat, t_in, crop, fuel,
                      coal_q, foul, boiler, L * W,
-                     YIELD_KG_M2, PRICE_TG_KG, tariff,
+                     yld, PRICE_TG_KG, tariff,
                      screen_cost_night=screen_cost, screen_owned=screen_owned)
 best = res["best"]
 d = decide_ev(best["cost_tg"], best["p_freeze"], best["loss_tg"],
@@ -217,16 +206,23 @@ with h1:
     night_cls = "action-heat" if d["action"] == "heat" else "action-hold"
     ok_week = ml_info is not None and ml_info.get("status") == "ok" and ml_pump["pred"]
     week_val = "СОБРАТЬ РАНЬШЕ" if week_dp["sell_early"] else "ЖДАТЬ"
+    revenue_day = (ml_pump['pred'] * harvest_kg * marketable / 100.0) if ok_week else 0.0
     week_line = (f"прогноз {ml_pump['pred']:,.0f} тг vs сейчас {ml_pump['base']:,.0f} тг "
-                 f"({ml_ds})" if ok_week
+                 f"({ml_ds}) · выручка за день сбора ≈ {revenue_day:,.0f} тг · окно хранения {shelf_days:.0f} дн"
+                 if ok_week
                  else "модель experimental — вердикт по цене не подаём (честно)")
     log_line = (f"{log_top['city']}: +{log_top['margin_kg']:.0f} тг/кг, {log_top['km']} км "
-                f"(для дефолтной машины 22 л/100км, 2 т)" if log_top else "нет региональных данных")
+                f"(для дефолтной машины 22 л/100км)" if log_top else "нет региональных данных")
+    boiler_warn = (' <span class="action-warn">· ⚠ котёл не тянет</span>'
+                   if "НЕ ТЯНЕТ" in str(best.get("boiler", "")) else "")
+    ev_line = (f"без котла риск {res['p_noheat']} (EV {res['p_noheat'] * best['loss_max_tg']:,.0f} тг) "
+               f"→ с профилем {best['p_freeze']} (EV {best['ev_loss_tg']:,.0f} тг)")
     st.markdown(f"""
     <div class="metric-card">
         <div class="label">Ночь — {weather_note}</div>
         <div class="value {night_cls}">{ACTION_RU_CARD.get(d['action'], d['action'])}</div>
-        <div class="sub">профиль {best['name']} · {best['fuel_qty']} м³ · {best['cost_tg']:,.0f} тг · риск без котла {res['p_noheat']}</div>
+        <div class="sub">профиль {best['name']} · {best['fuel_qty']} м³ · {best['cost_tg']:,.0f} тг (газ+экран){boiler_warn}</div>
+        <div class="sub">{ev_line}</div>
     </div>
     <div style="height:12px"></div>
     <div class="metric-card">
@@ -279,9 +275,9 @@ with tab1:
 
     st.markdown(f"""
     <div class="decision-box">
-        <h2>{action_label} — профиль <span style="color:#FF6B35">{best['name']}</span></h2>
+        <h2>{action_label} — профиль <span style="color:#FF8A5B">{best['name']}</span></h2>
         <div class="big">{ev_txt}</div>
-        <div class="sub">Экономия EV {ev_txt} тг против затрат {cost_txt} тг (p*={pstar_txt}, риск без отопления {d.get('p_noheat')}). Экран: {screen_txt} тг. Экономия профиля: {saving_txt} тг/ночь.</div>
+        <div class="sub">Экономия EV {ev_txt} тг против затрат {cost_txt} тг = газ {best['fuel_qty']} м³ × {tariff} тг + экран {screen_txt} тг (p*={pstar_txt}). Экономия профиля: {saving_txt} тг/ночь.</div>
         <div class="sub" style="margin-top:10px">Котел: {best['boiler']}. Старт: {best['start_at']}. Причина: {d['reason']}</div>
     </div>
     """, unsafe_allow_html=True)
@@ -306,7 +302,7 @@ with tab1:
         st.caption("Фактический газ не введён — «сторожилка» не проверяет модель.")
 
     with st.expander("Все 3 профиля"):
-        st.dataframe(pd.DataFrame(res["options"]), use_container_width=True)
+        st.dataframe(pd.DataFrame(res["options"]), width='stretch')
 
     text, used = verbalize_v2(d, options=res["options"], farmer_text="")
     st.markdown('<div class="section-title">Решение текстом</div>', unsafe_allow_html=True)
@@ -315,7 +311,7 @@ with tab1:
 
 with tab2:
     st.markdown('<div class="section-title">Ценовой риск — Ridge (ML)</div>', unsafe_allow_html=True)
-    st.warning("p_dump — ИНДЕКС 0-1, не вероятность. Обучение идёт на месячных ценах Тараза 2022-2026.")
+    st.caption("p_dump — индекс 0-1, не вероятность (калибровка Platt в планах). Обучение: месячные цены Тараза 2022-2026.")
     if ml_info is not None:
         st.write(f"Модель: {ml_ds} | строк: {ml_info.get('n')}, статус: {ml_info.get('status')}, "
                  f"MAE {ml_info.get('mae')} vs лаг {ml_info.get('mae_lag')}, "
@@ -358,7 +354,7 @@ with tab3:
         night = hist[(hrs >= 18) | (hrs <= 6)].to_dict("records")
         night = [{"T": float(r["T"]), "wind": float(r.get("wind", 3)), "time": str(r["time"])} for r in night]
         hres = optimize_night(night, L, W, H, mat, t_in, crop, fuel,
-                              coal_q, foul, boiler, L * W, YIELD_KG_M2, PRICE_TG_KG, tariff,
+                              coal_q, foul, boiler, L * W, yld, PRICE_TG_KG, tariff,
                               screen_cost_night=screen_cost, screen_owned=screen_owned)
         st.dataframe(pd.DataFrame(hres["options"]), width='stretch')
         st.success(f"best={hres['best']['name']}: {hres['best']['fuel_qty']} {hres['best']['fuel_unit']} / {hres['best']['cost_tg']:,.0f} тг")
@@ -374,7 +370,9 @@ with tab4:
     with c1:
         log_cons = st.number_input("Расход, л/100 км", value=22.0, step=0.5, min_value=5.0)
     with c2:
-        log_cap = st.number_input("Вместимость, тонн", value=2.0, step=0.5, min_value=0.3)
+        log_cap = st.number_input("Вместимость, тонн",
+                                  value=max(round(harvest_kg / 1000.0, 1), 0.3),
+                                  step=0.5, min_value=0.3)
     with c3:
         log_fuel = st.number_input("Цена топлива, тг/л", value=280.0, step=5.0)
     with c4:
@@ -396,7 +394,7 @@ with tab4:
             "city": "Город", "price": "Цена_тгкг", "km": "Дорога_км",
             "trip_tg": "Рейс_туда+обратно_тг", "cost_kg": "Себестоимость_тгкг",
             "margin_kg": "Маржа_тгкг", "margin_trip_tg": "Маржа_за_рейс_тг"})
-        st.dataframe(df_log, use_container_width=True, hide_index=True)
+        st.dataframe(df_log, width='stretch', hide_index=True)
         route = greedy_route(lout["rows"], log_days, capacity_kg=log_cap * 1000.0)
         if route["legs"]:
             path = " → ".join(["Тараз"] + [x["city"] for x in route["legs"]] + ["Тараз"])
