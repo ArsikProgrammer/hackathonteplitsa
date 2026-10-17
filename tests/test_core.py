@@ -151,6 +151,19 @@ def test_anomaly_guard():
     assert r["deviation"] == 0.4
 
 
+def test_logistics():
+    from logistics import haversine_km, trip_cost_tg
+    # Тараз-Алматы по прямой ~440 км
+    d = haversine_km((42.90, 71.36), (43.24, 76.95))
+    assert 400 < d < 500, d
+    # рейс 1000 км, 20 л/100км, 300 тг/л: 200 л -> 60000 в одну сторону, 120000 с порожняком
+    t = trip_cost_tg(1000.0, 2000.0, 20.0, 300.0)
+    assert t["trip_tg"] == 120000 and t["cost_per_kg"] == 60.0, t
+    # рефрижератор дороже
+    t2 = trip_cost_tg(1000.0, 2000.0, 20.0, 300.0, ref=True)
+    assert t2["trip_tg"] > t["trip_tg"], t2
+
+
 def test_price_verdict():
     from ai_assistant import price_verdict
     # импорт давит + спред >0 -> продавать раньше
@@ -167,7 +180,8 @@ if __name__ == "__main__":
     tests = [test_physics, test_dynamics_stable, test_loss_coef, test_freeze_scale,
              test_hdd, test_edge, test_dew, test_fuel_order, test_boiler,
              test_optimizer, test_ev, test_ev_marginal, test_decide_price,
-             test_price_guard, test_simulate, test_anomaly_guard, test_price_verdict]
+             test_price_guard, test_simulate, test_anomaly_guard, test_logistics,
+             test_price_verdict]
     for t in tests:
         t()
         print(f"PASS {t.__name__}")

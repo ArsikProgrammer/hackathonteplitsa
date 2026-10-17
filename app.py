@@ -91,6 +91,11 @@ st.markdown("""
     color: #FFFFFF;
     border-color: #FF6B35;
 }
+.hero-sub {
+    font-size: 1.05rem;
+    color: #9AA0A6;
+    margin: -8px 0 18px 0;
+}
 div.stButton > button {
     background: #121214;
     border: 1px solid #2A2A2E;
@@ -141,26 +146,107 @@ if farmer_text.strip():
         st.caption(f"Распознано ({farm_meta.get('source')}): {farm_params}")
 
 t_crit = T_CRIT_CUCUMBER if crop == "cucumber" else T_CRIT_TOMATO
-tab1, tab2, tab3 = st.tabs(["Ночь: топить?", "Неделя: продавать?", "История"])
+
+# ============ ОБЩИЙ РАСЧЁТ (один раз на ререндер, переиспользуется вкладками) ============
+# 1) НОЧЬ
+try:
+    fc = forecast_with_spread()
+    base_rows = fc["base"]
+    weather_note = f"погода: {fc['source']}"
+except Exception as e:
+    weather_note = f"нет сети — демо-ночь −5°C ({type(e).__name__})"
+    base_rows = [{"T": -5.0, "wind": 3.0, "RH": 85.0,
+                  "time": f"2024-03-14T{h:02d}:00"} for h in (18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5)]
+res = optimize_night(base_rows, L, W, H, mat, t_in, crop, fuel,
+                     coal_q, foul, boiler, L * W,
+                     YIELD_KG_M2, PRICE_TG_KG, tariff,
+                     screen_cost_night=screen_cost, screen_owned=screen_owned)
+best = res["best"]
+d = decide_ev(best["cost_tg"], best["p_freeze"], best["loss_tg"],
+              0.0, 0, readiness, v_gas_m3=best["fuel_qty"],
+              profile=best["name"], p_noheat=res["p_noheat"])
+ACTION_RU_CARD = {"heat": "ТОПИТЬ", "sell_early": "ПРОДАВАТЬ", "hold": "ДЕРЖАТЬ"}
+
+# 2) НЕДЕЛЯ (ML: месячная модель приоритет, иначе недельная)
+ml_info, ml_df, ml_ds = None, None, "нет данных"
+ml_pump = {"p_dump": 0.0, "days": 0, "pred": None, "base": 0.0,
+           "mean": 0.0, "imp": 0.0, "risk": None}
+try:
+    from price_risk import load_dataset, train_ridge, dump_risk_from_model
+    for csv_path, label in (("data/prices_monthly.csv", "месячная (2022-2026)"),
+                            (None, "недельная (2026)")):
+        try:
+            cand = load_dataset(csv_path=csv_path, crop=crop)
+            cand_info = train_ridge(cand)
+            ml_info, ml_df, ml_ds = cand_info, cand, label
+            if cand_info.get("status") == "ok":
+                break
+        except FileNotFoundError:
+            continue
+    if ml_info is not None:
+        ml_pump["base"] = float(ml_df.iloc[-1]["taraz_price"])
+        ml_pump["mean"] = float(ml_df.iloc[-1]["mean_price"])
+        if "import_m" in ml_df.columns and not pd.isna(ml_df.iloc[-1]["import_m"]):
+            ml_pump["imp"] = float(ml_df.iloc[-1]["import_m"])
+        if ml_info.get("status") == "ok" and ml_info.get("pred_next"):
+            ml_pump["pred"] = float(ml_info["pred_next"])
+            rr = dump_risk_from_model(ml_pump["pred"], ml_pump["base"])
+            ml_pump["p_dump"], ml_pump["days"] = rr["p_dump"], rr["days_to_dump"]
+            ml_pump["risk"] = rr
+except Exception:
+    pass
+week_dp = decide_price(ml_pump["base"], ml_pump["mean"], ml_pump["imp"],
+                       ml_pump["p_dump"], ml_pump["days"], readiness)
+
+# 3) ЛОГИСТИКА (дефолтная машина для сводки; параметры — во вкладке)
+log_top = None
+try:
+    from logistics import rank_cities
+    ldef = rank_cities(crop=crop)  # кэш после первого вызова
+    log_top = ldef["rows"][0] if ldef["rows"] else None
+except Exception:
+    pass
+
+tab1, tab2, tab3, tab4 = st.tabs(["Ночь: топить?", "Неделя: продавать?",
+                                  "История", "Куда везти"])
+
+# ============ ГЕРОЙ: быстрая сводка + 3D-разрез ============
+st.markdown("## Сегодня")
+h1, h2 = st.columns([3, 2], gap="large")
+with h1:
+    night_cls = "action-heat" if d["action"] == "heat" else "action-hold"
+    ok_week = ml_info is not None and ml_info.get("status") == "ok" and ml_pump["pred"]
+    week_val = "СОБРАТЬ РАНЬШЕ" if week_dp["sell_early"] else "ЖДАТЬ"
+    week_line = (f"прогноз {ml_pump['pred']:,.0f} тг vs сейчас {ml_pump['base']:,.0f} тг "
+                 f"({ml_ds})" if ok_week
+                 else "модель experimental — вердикт по цене не подаём (честно)")
+    log_line = (f"{log_top['city']}: +{log_top['margin_kg']:.0f} тг/кг, {log_top['km']} км "
+                f"(для дефолтной машины 22 л/100км, 2 т)" if log_top else "нет региональных данных")
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="label">Ночь — {weather_note}</div>
+        <div class="value {night_cls}">{ACTION_RU_CARD.get(d['action'], d['action'])}</div>
+        <div class="sub">профиль {best['name']} · {best['fuel_qty']} м³ · {best['cost_tg']:,.0f} тг · риск без котла {res['p_noheat']}</div>
+    </div>
+    <div style="height:12px"></div>
+    <div class="metric-card">
+        <div class="label">Неделя — цена огурца</div>
+        <div class="value">{'<span class="action-sell">' if week_dp['sell_early'] else '<span class="action-hold">'}{week_val}</span></div>
+        <div class="sub">{week_line}</div>
+    </div>
+    <div style="height:12px"></div>
+    <div class="metric-card">
+        <div class="label">Куда везти</div>
+        <div class="value">{log_top['city'] if log_top else '—'}</div>
+        <div class="sub">{log_line}</div>
+    </div>
+    """, unsafe_allow_html=True)
+with h2:
+    st.image("assets/greenhouse3d.png")
+    st.caption("Теплица 0.15 га в разрезе: ночью холод снаружи, тепло — котёл + почва. "
+               "Рендер генерируется кодом (tools/render_greenhouse3d.py).")
 
 with tab1:
-    try:
-        fc = forecast_with_spread()
-        base_rows = fc["base"]
-    except Exception as e:
-        st.error(f"Прогноз недоступен: {type(e).__name__}. Демо-ночь -5C.")
-        base_rows = [{"T": -5.0, "wind": 3.0, "RH": 85.0,
-                      "time": f"2024-03-14T{h:02d}:00"} for h in (18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5)]
-        fc = {"base": base_rows}
-    res = optimize_night(base_rows, L, W, H, mat, t_in, crop, fuel,
-                         coal_q, foul, boiler, L * W,
-                         YIELD_KG_M2, PRICE_TG_KG, tariff,
-                         screen_cost_night=screen_cost, screen_owned=screen_owned)
-    best = res["best"]
-    d = decide_ev(best["cost_tg"], best["p_freeze"], best["loss_tg"],
-                  0.0, 0, readiness, v_gas_m3=best["fuel_qty"],
-                  profile=best["name"], p_noheat=res["p_noheat"])
-
     cols = st.columns(4)
     cards = [
         ("Топливо", f"{best['fuel_qty']} {best['fuel_unit']}", best["name"]),
@@ -229,44 +315,20 @@ with tab1:
 
 with tab2:
     st.markdown('<div class="section-title">Ценовой риск — Ridge (ML)</div>', unsafe_allow_html=True)
-    st.warning("p_dump — ИНДЕКС 0-1, не вероятность. Нужно ≥30 недель БНС с импортом/курсом.")
-    p_dump, days = 0.0, 0
-    pred_price, base_p, mean_p, import_lag = None, 0.0, 0.0, 0.0
-    try:
-        from price_risk import load_dataset, train_ridge, dump_risk_from_model
-        # приоритет: месячная модель (Тараз 2022-2026, 47 точек); иначе недельная
-        info, df, ds_used = None, None, "недельная (2026)"
-        for csv_path, label in (("data/prices_monthly.csv", "месячная (2022-2026)"),
-                                (None, "недельная (2026)")):
-            try:
-                cand = load_dataset(csv_path=csv_path, crop=crop)
-                cand_info = train_ridge(cand)
-                info, df, ds_used = cand_info, cand, label
-                if cand_info.get("status") == "ok":
-                    break
-            except FileNotFoundError:
-                continue
-        if info is None:
-            raise FileNotFoundError("нет датасетов цен (prices_monthly/weekly.csv)")
-        base_p = float(df.iloc[-1]["taraz_price"])
-        mean_p = float(df.iloc[-1]["mean_price"])
-        if "import_m" in df.columns and not pd.isna(df.iloc[-1]["import_m"]):
-            import_lag = float(df.iloc[-1]["import_m"])
-        st.write(f"Модель: {ds_used} | строк: {info.get('n')}, статус: {info.get('status')}, "
-                 f"MAE {info.get('mae')} vs лаг {info.get('mae_lag')}, "
-                 f"прогноз: {info.get('pred_next')}")
-        if info.get("status") == "ok" and info.get("pred_next"):
-            pred_price = float(info["pred_next"])  # прогноз МОДЕЛИ, не текущая цена
-            r = dump_risk_from_model(pred_price, base_p)
-            p_dump, days = r["p_dump"], r["days_to_dump"]
-            st.write(r)
+    st.warning("p_dump — ИНДЕКС 0-1, не вероятность. Обучение идёт на месячных ценах Тараза 2022-2026.")
+    if ml_info is not None:
+        st.write(f"Модель: {ml_ds} | строк: {ml_info.get('n')}, статус: {ml_info.get('status')}, "
+                 f"MAE {ml_info.get('mae')} vs лаг {ml_info.get('mae_lag')}, "
+                 f"прогноз: {ml_info.get('pred_next')}")
+        if ml_pump.get("risk"):
+            st.write(ml_pump["risk"])
         else:
             st.caption("Ни одна модель не побила базлайн — индекс риска не считается (честно).")
-    except FileNotFoundError as e:
-        st.caption(str(e))
+    else:
+        st.caption("Датасеты цен не найдены (prices_monthly/weekly.csv).")
 
     # недельное решение: только sell_early/hold, «топить» на этом экране невозможно
-    dp = decide_price(base_p, mean_p, import_lag, p_dump, days, readiness)
+    dp = week_dp
     action_label2 = {"sell_early": "СОБРАТЬ РАНЬШЕ", "hold": "ЖДАТЬ"}[dp["action"]]
     action_class2 = "action-sell" if dp["sell_early"] else "action-hold"
     st.markdown(f"""
@@ -277,7 +339,8 @@ with tab2:
     </div>
     """, unsafe_allow_html=True)
 
-    pv = price_verdict(base_p, mean_p, import_lag, p_dump, days, readiness)
+    pv = price_verdict(ml_pump["base"], ml_pump["mean"], ml_pump["imp"],
+                       ml_pump["p_dump"], ml_pump["days"], readiness)
     st.markdown(f"""
     <div class="metric-card">
         <div class="label">Импорт / рынок</div>
@@ -301,4 +364,52 @@ with tab3:
         st.success(f"best={hres['best']['name']}: {hres['best']['fuel_qty']} {hres['best']['fuel_unit']} / {hres['best']['cost_tg']:,.0f} тг")
     except Exception as e:
         st.error(f"Нет истории: {e}")
+
+with tab4:
+    st.markdown('<div class="section-title">Логистика: куда везти (твоя машина)</div>',
+                unsafe_allow_html=True)
+    st.caption("Введи параметры своего транспорта — посчитает чистую маржу по 19 городам "
+               "и построит маршрут. Допущения: дорога = прямая×1.25, 70 км/ч, возврат порожняком.")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        log_cons = st.number_input("Расход, л/100 км", value=22.0, step=0.5, min_value=5.0)
+    with c2:
+        log_cap = st.number_input("Вместимость, тонн", value=2.0, step=0.5, min_value=0.3)
+    with c3:
+        log_fuel = st.number_input("Цена топлива, тг/л", value=280.0, step=5.0)
+    with c4:
+        log_drv = st.number_input("Водитель, тг/сутки", value=15000.0, step=1000.0)
+    c5, c6 = st.columns(2)
+    with c5:
+        log_ref = st.checkbox("Рефрижератор (+2.5 л/ч)", value=True)
+    with c6:
+        log_days = st.slider("Суток на рейс", 1, 7, 3)
+    try:
+        from logistics import rank_cities, greedy_route
+        lout = rank_cities(crop=crop, capacity_kg=log_cap * 1000.0,
+                           consum_l100=log_cons, fuel_price=log_fuel,
+                           ref=log_ref, driver_pay_per_day=log_drv)
+        m = lout["month"]
+        st.write(f"Цены: {m[1]:02d}.{m[0]} | цена дома (Тараз): {lout['home']:.0f} тг/кг | "
+                 f"машина: {log_cons} л/100км, {log_cap} т, реф={'да' if log_ref else 'нет'}")
+        df_log = pd.DataFrame(lout["rows"]).rename(columns={
+            "city": "Город", "price": "Цена_тгкг", "km": "Дорога_км",
+            "trip_tg": "Рейс_туда+обратно_тг", "cost_kg": "Себестоимость_тгкг",
+            "margin_kg": "Маржа_тгкг", "margin_trip_tg": "Маржа_за_рейс_тг"})
+        st.dataframe(df_log, use_container_width=True, hide_index=True)
+        route = greedy_route(lout["rows"], log_days, capacity_kg=log_cap * 1000.0)
+        if route["legs"]:
+            path = " → ".join(["Тараз"] + [x["city"] for x in route["legs"]] + ["Тараз"])
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="label">Лучший маршрут на {log_days} суток</div>
+                <div class="value">{path}</div>
+                <div class="sub">{route['total_km']} км, ~{route['days_used']} суток в пути,
+                маржа ≈ {route['margin_tg']:,.0f} тг (маржа считается консервативно)</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("При таких расходах ни один город не даёт положительной маржи — держать дома.")
+    except Exception as e:
+        st.error(f"Логистика: {type(e).__name__}: {e}")
 
