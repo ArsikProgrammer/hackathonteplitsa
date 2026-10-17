@@ -75,15 +75,14 @@ def test_optimizer():
     # p_noheat: холодная ночь без топки опаснее профиля
     assert 0.0 < res["p_noheat"] <= 1.0
     assert res["p_noheat"] >= res["best"]["p_freeze"], res
-    # экран платный: в теплую ночь P3 не всегда best, свой экран дешевле нового
+    # экран бесплатен: P3 экономит тепло чисто за счёт U*0.6
     warm = [{"T": -3.0, "wind": 3.0, "time": f"T{h}"} for h in range(12)]
-    r_new = optimize_night(warm)
-    r_own = optimize_night(warm, screen_owned=True)
-    p3_new = [o for o in r_new["options"] if o["name"] == "P3_screen"][0]
-    p3_own = [o for o in r_own["options"] if o["name"] == "P3_screen"][0]
-    assert p3_new["screen_fee_tg"] == 4000.0, p3_new
-    assert p3_own["screen_fee_tg"] == 500.0, p3_own
-    assert p3_own["cost_tg"] < p3_new["cost_tg"]
+    r = optimize_night(warm)
+    p3 = [o for o in r["options"] if o["name"] == "P3_screen"][0]
+    p1 = [o for o in r["options"] if o["name"] == "P1_flat"][0]
+    assert p3["screen_fee_tg"] == 0.0, p3
+    assert p3["E_kwh"] < p1["E_kwh"], (p3, p1)  # экран режет потери -> меньше энергии
+    assert p3["cost_tg"] < p1["cost_tg"], (p3, p1)
 
 
 def test_ev():
@@ -176,12 +175,50 @@ def test_price_verdict():
     assert r2["sell_early"] is False
 
 
+def test_calibrate_identifiable():
+    """Калибратор восстанавливает G из синтетических ночей с ветром."""
+    from calibrate import calibrate_UN
+    A_env, V_m3 = 2440.0, 6000.0
+    G_true, kW_true = 16600.0, 3000.0  # Вт/К
+    recs = []
+    for i, (dT, w) in enumerate([(20, 2), (23, 6), (15, 9), (18, 3),
+                                 (25, 11), (12, 5), (21, 7), (17, 8)]):
+        w_eff = min(max((w - 4.0) * 0.1, 0.0), 0.8)
+        q = G_true * dT + kW_true * dT * w_eff  # Вт
+        gas = q * 12 / (9.3 * 0.90) / 1000.0    # м³ за 12ч
+        recs.append({"t_in": 18.0, "t_out": 18.0 - dT, "v_gas_m3": gas,
+                     "hours": 12, "wind": float(w)})
+    r = calibrate_UN(recs, A_env, V_m3)
+    assert r["status"] == "ok", r
+    assert abs(r["G_hat"] - G_true) / G_true < 0.02, r
+    assert abs(r["kW_hat"] - kW_true) / kW_true < 0.05, r
+    assert r["N_fixed"] is True  # U/N по отдельности не идентифицируемы — честно
+
+
+def test_route_cargo_honest():
+    """Логистика: груз один на маршрут — маржа не ×N по городам, возврат в км."""
+    from logistics import greedy_route
+    real = [{"city": c, "price": 600, "km": 500, "trip_tg": 100000,
+             "cost_kg": 50.0, "margin_kg": 175.0, "margin_trip_tg": 350000}
+            for c in ("Шымкент", "Туркестан", "Конаев", "Алматы")]
+    r = greedy_route(real, days_budget=5, capacity_kg=2000.0, cargo_kg=2000.0)
+    if r["legs"]:  # маржа ≤ маржа/кг × весь груз, сколько бы городов ни взяли
+        assert r["margin_tg"] <= 175.0 * 2000.0 + 1.0, r
+        assert r["cargo_used_kg"] <= 2000.0, r
+    assert r["total_km"] > 0  # возврат домой всегда в км
+    # груз меньше машины — ноги не продают больше груза
+    r2 = greedy_route(real, days_budget=5, capacity_kg=2000.0, cargo_kg=500.0)
+    if r2["legs"]:
+        assert r2["cargo_used_kg"] <= 500.0 + 1e-6, r2
+        assert r2["margin_tg"] <= 175.0 * 500.0 + 1.0, r2
+
+
 if __name__ == "__main__":
     tests = [test_physics, test_dynamics_stable, test_loss_coef, test_freeze_scale,
              test_hdd, test_edge, test_dew, test_fuel_order, test_boiler,
              test_optimizer, test_ev, test_ev_marginal, test_decide_price,
              test_price_guard, test_simulate, test_anomaly_guard, test_logistics,
-             test_price_verdict]
+             test_price_verdict, test_calibrate_identifiable, test_route_cargo_honest]
     for t in tests:
         t()
         print(f"PASS {t.__name__}")

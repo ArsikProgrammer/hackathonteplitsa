@@ -147,34 +147,51 @@ def rank_cities(crop="cucumber", capacity_kg=2000.0, consum_l100=22.0,
     return {"month": month, "home": home, "kz_avg": kz_avg, "rows": rows}
 
 
-def greedy_route(rows, days_budget, capacity_kg=2000.0):
+def greedy_route(rows, days_budget, capacity_kg=2000.0, cargo_kg=None):
     """Жадный маршрут: ближайший город с положительной маржой, пока хватает суток.
-    Ограничение — время в пути (срок годности огурца). Возврат домой обязателен.
-    Маржа консервативна (каждый город как отдельный рейс с порожняком)."""
+
+    Груз ОДИН на весь маршрут: cargo_kg (по умолчанию — полная машина), каждая
+    нога продаёт только остаток груза — маржа не раздувается на «полных машин»
+    в каждом городе. Каждая нога выбирается только если успеваем доехать И
+    вернуться домой; возврат домой обязателен и входит в км/время.
+    Возврат пустой (порожняк) — маржа считается консервативно."""
     pool = [r for r in rows if r["margin_kg"] > 0]
-    if not pool:
-        return {"legs": [], "total_km": 0, "days_used": 0.0, "margin_tg": 0}
+    cargo_start = float(cargo_kg) if cargo_kg is not None else float(capacity_kg)
+    cargo_left = cargo_start
+    if not pool or cargo_left <= 0:
+        return {"legs": [], "total_km": 0, "days_used": 0.0, "margin_tg": 0,
+                "cargo_used_kg": 0.0, "cargo_total_kg": cargo_start}
     legs = []
     cur = "Тараз"
     total_km = 0.0
     hours_left = float(days_budget) * 24.0
     margin = 0.0
-    while pool:
+    while pool and cargo_left > 1e-6:
         pick = None
         for r in pool:
             km = road_km(cur, r["city"])
-            if km / AVG_SPEED_KMH <= hours_left and (pick is None or km < pick[0]):
+            back = road_km(r["city"], "Тараз")
+            # успеваем и продать, и вернуться: бюджет включает дорогу обратно
+            if (km + back) / AVG_SPEED_KMH <= hours_left and (pick is None or km < pick[0]):
                 pick = (km, r)
         if pick is None:
             break
         km, r = pick
         pool.remove(r)
-        legs.append({"city": r["city"], "km": round(km), "margin_kg": r["margin_kg"]})
+        kg = min(float(capacity_kg), cargo_left)  # везём не больше остатка груза
+        cargo_left -= kg
+        leg_margin = r["margin_kg"] * kg
+        legs.append({"city": r["city"], "km": round(km), "margin_kg": r["margin_kg"],
+                     "kg": round(kg, 1), "margin_tg": round(leg_margin)})
         total_km += km
         hours_left -= km / AVG_SPEED_KMH
-        margin += r["margin_kg"] * float(capacity_kg)
+        margin += leg_margin
         cur = r["city"]
-    total_km += road_km(cur, "Тараз")  # возврат домой всегда
+    ret_km = road_km(cur, "Тараз")
+    total_km += ret_km
+    hours_left = max(0.0, hours_left - ret_km / AVG_SPEED_KMH)  # время дороги домой
     return {"legs": legs, "total_km": round(total_km),
             "days_used": round(float(days_budget) - hours_left / 24.0, 1),
-            "margin_tg": round(margin)}
+            "margin_tg": round(margin),
+            "cargo_used_kg": round(cargo_start - cargo_left, 1),
+            "cargo_total_kg": round(cargo_start, 1)}

@@ -17,15 +17,13 @@ try:
     from .fuels import fuel_need, price_per_kwh, boiler_check
     from .freeze import hdd_deficit, freeze_risk, freeze_loss, estimate_t_in_no_heat
     from .config import (T_CRIT_CUCUMBER, T_CRIT_TOMATO, SAFETY_MARGIN_C, BOILER_KW_MAX,
-                         FREEZE_A, FREEZE_B, SCREEN_FACTOR, SCREEN_COST_PER_NIGHT,
-                         SCREEN_WORK_PER_NIGHT, SOIL_HA_W_PER_K)
+                         FREEZE_A, FREEZE_B, SCREEN_FACTOR, SOIL_HA_W_PER_K)
 except ImportError:
     from dynamics import heat_need_series, simulate_no_heat
     from fuels import fuel_need, price_per_kwh, boiler_check
     from freeze import hdd_deficit, freeze_risk, freeze_loss, estimate_t_in_no_heat
     from config import (T_CRIT_CUCUMBER, T_CRIT_TOMATO, SAFETY_MARGIN_C, BOILER_KW_MAX,
-                        FREEZE_A, FREEZE_B, SCREEN_FACTOR, SCREEN_COST_PER_NIGHT,
-                        SCREEN_WORK_PER_NIGHT, SOIL_HA_W_PER_K)
+                        FREEZE_A, FREEZE_B, SCREEN_FACTOR, SOIL_HA_W_PER_K)
 
 T_CRIT = {"cucumber": T_CRIT_CUCUMBER, "tomato": T_CRIT_TOMATO}
 
@@ -60,17 +58,13 @@ def _residual_hdd(night_rows, target_list, t_crit, boiler_ok=True, q_short_frac=
 def optimize_night(night_rows, length=50.0, width=30.0, height=4.0, material="film",
                    t_target=18.0, crop="cucumber", fuel="gas", coal_quality="good",
                    fouling=1.0, boiler_kw_max=BOILER_KW_MAX, area_m2=1500.0,
-                   yield_kg_m2=10.0, price_tg_kg=300.0, tariff_gas=35.0,
-                   screen_cost_night=None, screen_owned=False):
-    """Главная функция. Возврат best + все 3 опции + расписание включения."""
+                   yield_kg_m2=10.0, price_tg_kg=300.0, tariff_gas=35.0):
+    """Главная функция. Возврат best + все 3 опции + расписание включения.
+    Экран бесплатен: P3 учитывает только экономию тепла (U*0.6)."""
     t_crit = float(T_CRIT.get(crop, 8.0))
     t_min_allowed = t_crit + float(SAFETY_MARGIN_C)
     t_low = max(t_min_allowed, float(t_target) - 4.0)
     n = len(night_rows) or 1
-    # цена ночи экрана: аргумент > config; если уже куплен — только работа
-    _scr = float(screen_cost_night) if screen_cost_night is not None else float(SCREEN_COST_PER_NIGHT)
-    _scr_p3 = float(SCREEN_WORK_PER_NIGHT) if screen_owned else _scr
-
     profiles = {
         "P1_flat": [float(t_target)] * n,
         "P2_econight": _target_series(night_rows, t_target, t_low),
@@ -118,9 +112,8 @@ def optimize_night(night_rows, length=50.0, width=30.0, height=4.0, material="fi
             cost = round(float(fn["qty"]) * float(tariff_gas), 0)
         else:
             cost = fn["cost_tg"]
-        # P3: экран платный, иначе всегда best. Куплен — только работа.
-        screen_fee = round(_scr_p3, 0) if name == "P3_screen" else 0.0
-        cost = round(float(cost) + float(screen_fee), 0)
+        # Экран бесплатен — P3 сравнивается только по теплу/газу.
+        screen_fee = 0.0
         J = round(float(cost) + float(ev_loss), 0)
         # расписание: первый час где Q>30% пика
         start = ""

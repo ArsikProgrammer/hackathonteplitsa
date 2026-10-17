@@ -1,9 +1,10 @@
-"""Калибровка пары (U,N): beta=(X'X+lI)^-1 X'y. X=[[A*dT,V*dT]], y=Вт."""
+"""Калибровка по ночным данным: beta=(X'X+lI)^-1 X'y.
+Идентифицируемая схема: Q = G*dT + kW*dT*wind_eff (см. calibrate_UN)."""
 import numpy as np
 try:
-    from .config import LHV_GAS, BOILER_ETA, VENT_COEF
+    from .config import LHV_GAS, BOILER_ETA, VENT_COEF, AIR_EXCHANGE
 except ImportError:
-    from config import LHV_GAS, BOILER_ETA, VENT_COEF
+    from config import LHV_GAS, BOILER_ETA, VENT_COEF, AIR_EXCHANGE
 
 
 def calibrate_U(records, A_env, lam=1.0):
@@ -26,37 +27,60 @@ def calibrate_U(records, A_env, lam=1.0):
 
 
 def calibrate_UN(records, A_env, V_m3, lam=1.0):
-    """Пара (U,N). Нужно >=7 ночей с разным ветром. cond>30 = коллинеарность."""
-    rx, ry = [], []
+    """Калибровка по ночным данным — идентифицируемая параметризация.
+
+    Старый вид X=[[A*dT, V*dT]] был коллинеарен ВСЕГДА (ratio V/A константа):
+    U и N разделиться не могли, ветер в design matrix не входил.
+    Теперь: Q = G*dT + kW*dT*wind_eff, где
+      G   — итоговая теплоотдача Вт/К (стены + базовая вентиляция),
+      kW  — ветровая доля (только при разном ветре между ночами),
+      U   — выводится из G при фиксированном N=AIR_EXCHANGE: U=(G-0.33*N*V)/A.
+    N отдельно из этих данных НЕ идентифицируем (физически: только сумма
+    U*A+0.33*N*V наблюдаема) — возвращается фиксированным, честно помечен.
+    Нужно >=7 ночей. cond>30 при наличии ветрового столбца = мало ветров."""
+    xs, ys, winds = [], [], []
     for r in records:
         dT = float(r["t_in"]) - float(r["t_out"])
         if dT <= 0:
             continue
-        rx.append([float(A_env) * dT, float(V_m3) * dT])
-        ry.append(float(r["v_gas_m3"]) * (LHV_GAS * BOILER_ETA) / max(float(r.get("hours", 10)), 1) * 1000.0)
-    X = np.array(rx); y = np.array(ry); n = len(X)
+        w = r.get("wind")
+        w_eff = 0.0
+        if w is not None:
+            w_eff = min(max((float(w) - 4.0) * 0.1, 0.0), 0.8)  # как в physics.effective_n
+        xs.append([dT, dT * w_eff])  # схема: Q = G*dT + kW*dT*wind_eff
+        ys.append(float(r["v_gas_m3"]) * (LHV_GAS * BOILER_ETA) / max(float(r.get("hours", 10)), 1) * 1000.0)
+        winds.append(w_eff)
+    X = np.array(xs); y = np.array(ys); n = len(X)
     if n < 7:
         return {"U_hat": None, "N_hat": None, "status": "need>=7 nights", "n": n}
-    XtX = X.T @ X + lam * np.eye(2)
+    # ветровой столбец пуст (нет ветра или нет вариации) -> только G
+    if not np.any(X[:, 1]):
+        X = X[:, :1]
+    XtX = X.T @ X + lam * np.eye(X.shape[1])
     try:
         beta = np.linalg.solve(XtX, X.T @ y)
     except Exception:
         return {"U_hat": None, "N_hat": None, "status": "singular", "n": n}
-    Uh, kh = float(beta[0]), float(beta[1])
-    Nh = kh / float(VENT_COEF)
+    G_hat = float(beta[0])
     resid = y - X @ beta
-    s2 = float(resid @ resid) / max(n - 2, 1)
+    s2 = float(resid @ resid) / max(n - X.shape[1], 1)
     try:
         cov = s2 * np.linalg.inv(XtX)
-        seU, seN = float((max(cov[0, 0], 0)) ** 0.5), float((max(cov[1, 1], 0)) ** 0.5) / float(VENT_COEF)
+        seG = float(max(cov[0, 0], 0.0) ** 0.5)
         sv = np.linalg.svd(X, compute_uv=False)
-        cond = float(sv[0] / max(sv[-1], 1e-12))
+        cond = float(sv[0] / max(sv[-1], 1e-12)) if X.shape[1] > 1 else 1.0
     except Exception:
-        seU, seN, cond = float("nan"), float("nan"), float("nan")
-    clip = not (2.0 <= Uh <= 8.0) or not (0.2 <= Nh <= 2.5)
-    return {"U_hat": round(Uh, 2), "N_hat": round(Nh, 3), "se_U": round(seU, 3),
-            "se_N": round(seN, 4), "cond": round(cond, 1), "n": n,
-            "clipped": clip, "status": "ok" if cond < 30 else "ok:collinear-warn"}
+        seG, cond = float("nan"), 1.0
+    # U при фиксированном базовом N (не оцениваем — не идентифицируем из этих данных)
+    U_hat = (G_hat - VENT_COEF * float(AIR_EXCHANGE) * float(V_m3)) / max(float(A_env), 1e-9)
+    clip = not (2.0 <= U_hat <= 8.0)
+    out = {"G_hat": round(G_hat, 1), "U_hat": round(U_hat, 2),
+           "N_hat": float(AIR_EXCHANGE), "N_fixed": True,
+           "kW_hat": round(float(beta[1]), 1) if X.shape[1] > 1 else 0.0,
+           "se_G": round(seG, 1), "cond": round(cond, 1), "n": n,
+           "clipped": clip, "status": "ok" if cond < 30 else "ok:collinear-warn",
+           "note": "U выведен из G при базовом N; U и N по отдельности из газа не идентифицируемы"}
+    return out
 
 
 def calibrate_soil(night_series, C_soil_kwh=125.0):

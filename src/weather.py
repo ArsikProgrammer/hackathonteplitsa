@@ -31,12 +31,15 @@ def get_forecast(lat=TARAZ_LAT, lon=TARAZ_LON, days=2):
         "latitude": lat, "longitude": lon,
         "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
         "forecast_days": days, "timezone": "Asia/Almaty",
+        # дефолт API — км/ч, а физика считает в м/с (пороги 4/8 м/с)
+        "wind_speed_unit": "ms",
     }
     try:
-        data, from_cache = _cached_get(url, params, f"fc_{lat}_{lon}_{days}")
+        # ключ с _ms: старый кэш хранит км/ч, физика ждёт м/с — не смешивать
+        data, from_cache = _cached_get(url, params, f"fc_{lat}_{lon}_{days}_ms")
     except Exception:
         # fallback: последний кэш любой свежести
-        cp = CACHE_DIR / f"fc_{lat}_{lon}_{days}.json"
+        cp = CACHE_DIR / f"fc_{lat}_{lon}_{days}_ms.json"
         if cp.exists():
             data = json.loads(cp.read_text(encoding="utf-8"))
             from_cache = True
@@ -62,8 +65,9 @@ def get_forecast_ensemble(lat=TARAZ_LAT, lon=TARAZ_LON, days=7):
         "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
         "forecast_days": days, "timezone": "Asia/Almaty",
         "models": "icon_seamless,gfs_seamless,ecmwf_ifs",
+        "wind_speed_unit": "ms",
     }
-    data, from_cache = _cached_get(url, params, f"ens_{lat}_{lon}_{days}", ttl_hours=3)
+    data, from_cache = _cached_get(url, params, f"ens_{lat}_{lon}_{days}_ms", ttl_hours=3)
     h = data["hourly"]
     times = h["time"]
     temps = h.get("temperature_2m")
@@ -94,8 +98,10 @@ def get_archive(lat, lon, start_date, end_date):
         "latitude": lat, "longitude": lon, "start_date": start_date,
         "end_date": end_date, "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
         "timezone": "Asia/Almaty",
+        "wind_speed_unit": "ms",
     }
-    data, _ = _cached_get(url, params, f"ar_{lat}_{lon}_{start_date}_{end_date}", ttl_hours=24 * 30)
+    # ключ с _ms: старый кэш хранит км/ч — он не должен попадать в расчёт
+    data, _ = _cached_get(url, params, f"ar_{lat}_{lon}_{start_date}_{end_date}_ms", ttl_hours=24 * 30)
     h = data["hourly"]
     return [
         {"time": t, "T": T, "RH": rh, "wind": w}
