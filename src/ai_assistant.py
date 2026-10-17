@@ -258,11 +258,17 @@ def anomaly_guard(actual_gas_m3, model_gas_m3, p_freeze, note=""):
 
 def price_verdict(taraz_price, mean_price, import_lag, p_dump, days_to_dump, readiness):
     """ИИ-конклюжн по импорту: стоит ли собирать раньше.
+    Делегирует решение decision.decide_price (единое правило), здесь — текст.
     Возврат dict с решением и текстом.
     """
-    import_pressure = float(import_lag) > 0 if import_lag is not None else False
-    spread = float(taraz_price) - float(mean_price)
-    sell = (float(p_dump) >= 0.6 and float(readiness) >= 0.8) or (spread > 0 and import_pressure)
+    try:
+        from .decision import decide_price
+    except ImportError:
+        from decision import decide_price
+    dp = decide_price(taraz_price, mean_price, import_lag, p_dump,
+                      days_to_dump, readiness)
+    import_pressure = dp["import_pressure"]
+    spread = dp["spread"]
     reason = []
     if import_pressure:
         reason.append(f"импорт вырос ({import_lag}t), давит на цену")
@@ -271,7 +277,8 @@ def price_verdict(taraz_price, mean_price, import_lag, p_dump, days_to_dump, rea
     if float(p_dump) >= 0.6:
         reason.append(f"индекс риска просадки {p_dump}")
     text = (" ; ".join(reason) if reason else "рынок стабилен")
-    return {"sell_early": bool(sell), "spread": round(spread, 1),
-            "import_pressure": bool(import_pressure), "text": text,
+    return {"sell_early": dp["sell_early"], "spread": spread,
+            "import_pressure": import_pressure, "text": text,
+            "action": dp["action"], "reason": dp["reason"],
             "days_to_dump": int(days_to_dump)}
 

@@ -9,9 +9,11 @@ from config import (DEMO_GREENHOUSE, T_TARGET_C, GAS_TARIFF_TG_M3, YIELD_KG_M2,
                     PRICE_TG_KG, T_CRIT_CUCUMBER, T_CRIT_TOMATO, BOILER_KW_MAX)
 from weather import forecast_with_spread
 from optimizer import optimize_night
+from dynamics import simulate_no_heat
 from freeze import dew_point_magnus, disease_flag
-from decision import decide_ev
-from ai_assistant import verbalize_v2, anomaly_guard, price_verdict
+from decision import decide_ev, decide_price
+from ai_assistant import (verbalize_v2, anomaly_guard, price_verdict,
+                          extract_farm_state)
 
 st.set_page_config(page_title="Теплица 0.15 га — автопилот", layout="wide",
                    initial_sidebar_state="expanded")
@@ -121,6 +123,22 @@ with st.sidebar:
     readiness = st.slider("Готовность культуры", 0.0, 1.0, 0.85)
     screen_cost = st.number_input("Цена ночи экрана, тг", value=4000.0, step=100.0)
     screen_owned = st.checkbox("Экран уже куплен (только работа)", value=False)
+    fact_gas = st.number_input("Фактический газ за ночь, м³ (0 — не мерил)",
+                               value=0.0, step=1.0, min_value=0.0)
+    farmer_text = st.text_input("Слова фермера (топливо/котёл/культура)", "")
+
+# «Уши»: слова фермера переопределяют паспорт (LLM или keyword-фолбэк)
+if farmer_text.strip():
+    farm_params, farm_meta = extract_farm_state(farmer_text)
+    crop = farm_params.get("crop") or crop
+    fuel = farm_params.get("fuel") or fuel
+    coal_q = farm_params.get("coal_quality") or coal_q
+    if farm_params.get("fouling") is not None:
+        foul = float(farm_params["fouling"])
+    if farm_params.get("readiness") is not None:
+        readiness = float(farm_params["readiness"])
+    with st.sidebar:
+        st.caption(f"Распознано ({farm_meta.get('source')}): {farm_params}")
 
 t_crit = T_CRIT_CUCUMBER if crop == "cucumber" else T_CRIT_TOMATO
 tab1, tab2, tab3 = st.tabs(["Ночь: топить?", "Неделя: продавать?", "История"])
@@ -140,7 +158,8 @@ with tab1:
                          screen_cost_night=screen_cost, screen_owned=screen_owned)
     best = res["best"]
     d = decide_ev(best["cost_tg"], best["p_freeze"], best["loss_tg"],
-                  0.0, 0, readiness, v_gas_m3=best["fuel_qty"], profile=best["name"])
+                  0.0, 0, readiness, v_gas_m3=best["fuel_qty"],
+                  profile=best["name"], p_noheat=res["p_noheat"])
 
     cols = st.columns(4)
     cards = [
@@ -155,7 +174,7 @@ with tab1:
             action_class = "action-heat"
         elif extra == "hold":
             action_class = "action-hold"
-        elif extra == "sell":
+        elif extra == "sell_early":
             action_class = "action-sell"
         cols[i].markdown(f"""
         <div class="metric-card">
@@ -176,19 +195,29 @@ with tab1:
     <div class="decision-box">
         <h2>{action_label} — профиль <span style="color:#FF6B35">{best['name']}</span></h2>
         <div class="big">{ev_txt}</div>
-        <div class="sub">EV потерь {ev_txt} тг против затрат {cost_txt} тг (p*={pstar_txt}). Экран: {screen_txt} тг. Экономия: {saving_txt} тг/ночь.</div>
+        <div class="sub">Экономия EV {ev_txt} тг против затрат {cost_txt} тг (p*={pstar_txt}, риск без отопления {d.get('p_noheat')}). Экран: {screen_txt} тг. Экономия профиля: {saving_txt} тг/ночь.</div>
         <div class="sub" style="margin-top:10px">Котел: {best['boiler']}. Старт: {best['start_at']}. Причина: {d['reason']}</div>
     </div>
     """, unsafe_allow_html=True)
 
     rhs = [r.get("RH", 80) for r in base_rows]
     td = dew_point_magnus(min(r["T"] for r in base_rows), max(rhs))
-    dz = disease_flag(rhs, [t_in] * len(rhs))
+    try:
+        prof_noheat = simulate_no_heat(base_rows, L, W, H, mat, t_in_start=t_in)
+        t_in_series = [r["T_in"] for r in prof_noheat]
+    except Exception:
+        t_in_series = [t_in] * len(rhs)
+    dz = disease_flag(rhs, t_in_series)
     st.caption(f"Роса ~{td}°C. Гниль: {'ДА — проветрить' if dz['risk'] else 'нет'}. Tcrit {t_crit}°C.")
 
-    ag = anomaly_guard(float(best["fuel_qty"]), float(best["fuel_qty"]), best["p_freeze"])
-    if ag["flag"]:
-        st.warning(ag["note"])
+    if fact_gas > 0:
+        ag = anomaly_guard(float(fact_gas), float(best["fuel_qty"]), best["p_freeze"])
+        if ag["flag"]:
+            st.warning(ag["note"])
+        else:
+            st.success(f"Факт {fact_gas} м³ — в пределах модели (±30%).")
+    else:
+        st.caption("Фактический газ не введён — «сторожилка» не проверяет модель.")
 
     with st.expander("Все 3 профиля"):
         st.dataframe(pd.DataFrame(res["options"]), use_container_width=True)
@@ -199,57 +228,71 @@ with tab1:
     st.caption("LLM" if used else "Шаблон без LLM")
 
 with tab2:
-    st.markdown('<div class="section-title">Ценовой риск — experimental</div>', unsafe_allow_html=True)
-    st.warning("p_dump — ИНДЕКС 0-1, не вероятность. Нужно ≥30 недель БНС. Сейчас TEMPLATE-12 строк.")
+    st.markdown('<div class="section-title">Ценовой риск — Ridge (ML)</div>', unsafe_allow_html=True)
+    st.warning("p_dump — ИНДЕКС 0-1, не вероятность. Нужно ≥30 недель БНС с импортом/курсом.")
     p_dump, days = 0.0, 0
-    pred_price = None
+    pred_price, base_p, mean_p, import_lag = None, 0.0, 0.0, 0.0
     try:
         from price_risk import load_dataset, train_ridge, dump_risk_from_model
-        df = load_dataset(crop=crop)
-        info = train_ridge(df)
-        st.write(f"Строк: {info.get('n')}, статус: {info.get('status')}, MAE {info.get('mae')} vs lag {info.get('mae_lag')}")
-        if info.get("status") == "ok":
-            base_p = float(df.iloc[-1]["taraz_price"])
-            pred_price = base_p
+        # приоритет: месячная модель (Тараз 2022-2026, 47 точек); иначе недельная
+        info, df, ds_used = None, None, "недельная (2026)"
+        for csv_path, label in (("data/prices_monthly.csv", "месячная (2022-2026)"),
+                                (None, "недельная (2026)")):
+            try:
+                cand = load_dataset(csv_path=csv_path, crop=crop)
+                cand_info = train_ridge(cand)
+                info, df, ds_used = cand_info, cand, label
+                if cand_info.get("status") == "ok":
+                    break
+            except FileNotFoundError:
+                continue
+        if info is None:
+            raise FileNotFoundError("нет датасетов цен (prices_monthly/weekly.csv)")
+        base_p = float(df.iloc[-1]["taraz_price"])
+        mean_p = float(df.iloc[-1]["mean_price"])
+        if "import_m" in df.columns and not pd.isna(df.iloc[-1]["import_m"]):
+            import_lag = float(df.iloc[-1]["import_m"])
+        st.write(f"Модель: {ds_used} | строк: {info.get('n')}, статус: {info.get('status')}, "
+                 f"MAE {info.get('mae')} vs лаг {info.get('mae_lag')}, "
+                 f"прогноз: {info.get('pred_next')}")
+        if info.get("status") == "ok" and info.get("pred_next"):
+            pred_price = float(info["pred_next"])  # прогноз МОДЕЛИ, не текущая цена
             r = dump_risk_from_model(pred_price, base_p)
             p_dump, days = r["p_dump"], r["days_to_dump"]
             st.write(r)
+        else:
+            st.caption("Ни одна модель не побила базлайн — индекс риска не считается (честно).")
     except FileNotFoundError as e:
         st.caption(str(e))
 
-    d2 = decide_ev(0, 0.0, 1, p_dump, days, readiness)
-    action_label2 = {"heat": "ТОПИТЬ", "sell_early": "СОБРАТЬ РАНЬШЕ", "hold": "ЖДАТЬ"}[d2["action"]]
-    action_class2 = "action-heat" if d2["action"] == "heat" else ("action-hold" if d2["action"] == "hold" else "action-sell")
+    # недельное решение: только sell_early/hold, «топить» на этом экране невозможно
+    dp = decide_price(base_p, mean_p, import_lag, p_dump, days, readiness)
+    action_label2 = {"sell_early": "СОБРАТЬ РАНЬШЕ", "hold": "ЖДАТЬ"}[dp["action"]]
+    action_class2 = "action-sell" if dp["sell_early"] else "action-hold"
     st.markdown(f"""
     <div class="metric-card">
         <div class="label">Совет по рынку</div>
         <div class="value {action_class2}">{action_label2}</div>
+        <div class="sub">{dp['reason']}</div>
     </div>
     """, unsafe_allow_html=True)
 
-    try:
-        pv = price_verdict(
-            float(df.iloc[-1]["taraz_price"]) if 'df' in locals() else 0.0,
-            float(df.iloc[-1]["mean_price"]) if 'df' in locals() else 0.0,
-            float(df.iloc[-1]["import_m"]) if 'df' in locals() and not pd.isna(df.iloc[-1]["import_m"]) else 0.0,
-            p_dump, days, readiness)
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="label">Импорт / рынок</div>
-            <div class="value">{pv['text']}</div>
-            <div class="sub">Дней до просадки: {pv['days_to_dump']}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    except Exception:
-        pass
+    pv = price_verdict(base_p, mean_p, import_lag, p_dump, days, readiness)
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="label">Импорт / рынок</div>
+        <div class="value">{pv['text']}</div>
+        <div class="sub">Дней до просадки: {pv['days_to_dump']}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 with tab3:
     st.markdown('<div class="section-title">Контрфакт 13–15.03.2024 (−11°C)</div>', unsafe_allow_html=True)
     try:
         hist = pd.read_csv("data/taraz_2024-03-13_15_real.csv")
         st.line_chart(hist.set_index("time")[["T"]], width='stretch')
-        cold = hist[hist["T"] < -5].copy()
-        night = cold.to_dict("records")
+        hrs = hist["time"].astype(str).str[11:13].astype(int)
+        night = hist[(hrs >= 18) | (hrs <= 6)].to_dict("records")
         night = [{"T": float(r["T"]), "wind": float(r.get("wind", 3)), "time": str(r["time"])} for r in night]
         hres = optimize_night(night, L, W, H, mat, t_in, crop, fuel,
                               coal_q, foul, boiler, L * W, YIELD_KG_M2, PRICE_TG_KG, tariff,

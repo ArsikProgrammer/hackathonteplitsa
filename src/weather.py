@@ -130,9 +130,11 @@ def forecast_with_spread(lat=TARAZ_LAT, lon=TARAZ_LON, spread=2.0):
             s = float(r.get("T_spread", spread))
             cold.append({**r, "T": float(r["T"]) - s})
             warm.append({**r, "T": float(r["T"]) + s})
+        mean_spread = (sum(float(r.get("T_spread", spread)) for r in base) / len(base)) if base else float(spread)
         return {
             "base": base, "cold": cold, "warm": warm,
-            "spread": float(ens.get("n_members", 1)),
+            "spread": round(mean_spread, 2),
+            "n_members": int(ens.get("n_members", 1)),
             "from_cache": ens["from_cache"],
             "source": "ensemble",
         }

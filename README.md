@@ -20,14 +20,17 @@ src/freeze.py      — HDD, риск заморозка (логистика), т
 src/fuels.py       — цена за кВт*ч тепла: газ 4.18, уголь 6.31/20.35, boiler_check
 src/calibrate.py   — калибровка (U,N) Ridge beta=(X'X+lI)^-1 X'y, контроль cond
 src/optimizer.py   — 3 профиля (P1 flat, P2 econight, P3 screen), J=cost+EV -> min
-src/decision.py    — EV: heat если p*Loss > Cost, p*=Cost/Loss, порт p_star
+src/decision.py    — EV маржинальный: heat если (p_noheat-p)*Loss>Cost; decide_price() для недели
 src/price_risk.py  — только лаги t-1 и старше, RidgeCV+TimeSeriesSplit, p_dump=индекс
 src/weather.py     — Open-Meteo прогноз + архив ERA5 + ансамбль (icon/gfs/ecmwf)
 src/llm_verbalizer.py — 1 вызов LLM, fallback, проверка чисел регуляркой
 src/ai_assistant.py — уши (текст фермера -> параметры), рот (объяснение), сторожилка (вычеты)
 app.py             — 3 экрана: Ночь / Неделя / История
 run_demo.py        — сквозной прогон
-tests/test_core.py — 15 тестов
+tests/test_core.py — 17 тестов (pytest-совместимые)
+tools/fetch_bns_prices.py — сбор недельников БНС (.xls/.xlsx, даты из заголовков)
+tools/fetch_regional_monthly.py — месячные цены по регионам (Тараз, 2022-2026)
+tools/fill_features.py — погода Ташкента + импорт Comtrade + курс НБРК -> CSV
 tools/render_greenhouse3d.py — 3D превью теплицы в разрезе (matplotlib)
 data/              — реальные погодные и ценовые данные
 assets/greenhouse3d.png — 3D рендер теплицы
@@ -37,21 +40,21 @@ assets/greenhouse3d.png — 3D рендер теплицы
 
 ```bash
 pip install -r requirements.txt
-python run_demo.py          # сквозной прогон, тесты 13/13
+python run_demo.py          # сквозной прогон, тесты 17/17
 streamlit run app.py        # веб-интерфейс (3 экрана)
-python tests/test_core.py   # все тесты
+python tests/test_core.py   # все тесты (pytest совместимо)
 ```
 
 ## Статус (честно)
 
 | Блок | Статус | Комментарий |
 |------|--------|-------------|
-| Тепло/динамика | ✅ Работает | 15/15 тестов |
+| Тепло/динамика | ✅ Работает | 17/17 тестов |
 | Топливо/газ/уголь | ✅ Работает | fouling учтен |
 | Оптимизатор 3 профиля | ✅ Работает | экран платный |
 | EV-решение | ✅ Работает | p*=Cost/Loss, не 0.5 |
 | Погода/прогноз | ✅ Работает | ансамбль + fallback |
-| Цена/импорт | ⚠️ Experimental | need>=30 недель БНС, сейчас 12 строк шаблона |
+| Цена/импорт | ✅ Месячная модель ok | 47 точек Тараз 2022-2026: MAE 85 < лаг 120 (огурец), 72 < 116 (помидор); недельная 2026 — experimental |
 | Риск заморозка | ⚠️ Эвристика | требует полевой валидации |
 | LLM-ассистент | ✅ Работает | fallback без ключа, проверка чисел |
 | 3D превью | ✅ Есть | assets/greenhouse3d.png (черновик matplotlib) |
@@ -87,10 +90,12 @@ python tests/test_core.py   # все тесты
 `J = cost + EV -> min`. Экран платный: амортизация + работа за Nacht (4000 тг дефолт, 500 если уже куплен).
 
 ### Решение (decision.py)
-EV вместо порога 0.5:
-- `heat если p_freeze * Loss > Cost`
+Маржинальный EV вместо порога 0.5:
+- `heat если (p_noheat - p_freeze) * Loss_max > Cost` — сравнение с ночью без отопления
+- тёплая ночь: `p_noheat ≈ p_freeze` → «держать»; холодная: `p_noheat >> p_freeze` → «топить»
 - `p* = Cost / Loss_max` (0.002-0.004, не 0.5)
 - `loss_tg` — уже матожидание, не умножать на p дважды
+- `decide_price()` — недельное решение sell_early/hold (экран «Неделя» не может ответить «топить»)
 
 ### Риск заморозка (freeze.py)
 Логистика: `p = 1/(1+exp(-(A*HDD + B)))`, A=0.045, B=-2.7

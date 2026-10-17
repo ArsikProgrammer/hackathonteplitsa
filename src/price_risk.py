@@ -16,30 +16,39 @@ TARGET = "taraz_price"
 def load_bns_xlsx(url_or_path, city="Тараз"):
     """БНС недельник «Соцзначимые продтовары», лист 5 (средние цены).
 
-    Качает xlsx по прямой ссылке или читает файл, ищет город по слову
-    в шапке, возвращает DataFrame схемы price_risk.
-    Огурцы/помидоры — строки, содержащие эти слова.
+    Понимает и xlsx, и старый формат .xls (stat.gov.kz отдаёт оба; .xls
+    читается через xlrd). Ищет город по слову в шапке, возвращает
+    DataFrame схемы price_risk. Огурцы/помидоры — строки с этими словами.
+    Дату недели извлекает из заголовка («по состоянию на 31 октября 2023»).
     """
-    import openpyxl, io
+    import io
+    import re
     if str(url_or_path).startswith("http"):
         import requests
         r = requests.get(url_or_path, timeout=60)
         r.raise_for_status()
-        wb = openpyxl.load_workbook(io.BytesIO(r.content), read_only=True, data_only=True)
+        src = io.BytesIO(r.content)
     else:
-        wb = openpyxl.load_workbook(url_or_path, read_only=True, data_only=True)
-    # лист 5 — средние цены (судя по структуре), ищем по заголовку
-    target_sheet = None
-    for name in wb.sheetnames:
-        if str(name).strip() == "5":
-            target_sheet = name
-            break
-    if target_sheet is None:
-        target_sheet = wb.sheetnames[-1]
-    ws = wb[target_sheet]
-    rows = list(ws.iter_rows(values_only=True))
+        src = str(url_or_path)
+    sheets = pd.read_excel(src, sheet_name=None, header=None)
+    # лист «5» — средние цены; иначе последний лист
+    target = "5" if "5" in sheets else list(sheets)[-1]
+    raw = sheets[target].values
+    rows = [[None if pd.isna(c) else c for c in row] for row in raw]
     if len(rows) < 5:
-        raise ValueError(f"BNS sheet {target_sheet} too small")
+        raise ValueError(f"BNS sheet {target} too small")
+    # дата недели из заголовка листа
+    months = {"января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5,
+              "июня": 6, "июля": 7, "августа": 8, "сентября": 9, "октября": 10,
+              "ноября": 11, "декабря": 12}
+    date = pd.NaT
+    title = str(rows[0][0] or "")
+    m = re.search(r"на (\d{1,2}) (\S+) (\d{4})", title)
+    if m and m.group(2) in months:
+        try:
+            date = pd.Timestamp(int(m.group(3)), months[m.group(2)], int(m.group(1)))
+        except Exception:
+            date = pd.NaT
     # шапка: строка 3 (индекс 2) содержит города
     header = [str(c) if c else "" for c in rows[2]]
     ci = None
@@ -65,7 +74,7 @@ def load_bns_xlsx(url_or_path, city="Тараз"):
         raise ValueError("No cucumber/tomato rows in BNS sheet")
     # неделя подставим по порядку (добавить дату при необходимости)
     df["week"] = range(1, len(df) + 1)
-    df["date"] = pd.NaT
+    df["date"] = date
     df["city"] = city
     df["import_m"] = np.nan
     df["tashkent_T"] = np.nan
@@ -77,7 +86,13 @@ def load_bns_xlsx(url_or_path, city="Тараз"):
 def build_features(df):
     """sin/cos + лаги t-1 и старше. Без подсмотра текущей недели."""
     df = df.copy().sort_values(["city", "crop", "week"]).reset_index(drop=True)
-    w = df["week"].astype(float)
+    # сезонность: реальная ISO-неделя из даты, fallback — порядковый week
+    if "date" in df.columns:
+        dts = pd.to_datetime(df["date"], errors="coerce")
+        iso = dts.dt.isocalendar().week.astype(float)
+        w = iso.fillna(df["week"].astype(float))
+    else:
+        w = df["week"].astype(float)
     df["sin_w"] = np.sin(2 * np.pi * w / 52.0)
     df["cos_w"] = np.cos(2 * np.pi * w / 52.0)
     g = df.groupby(["city", "crop"], group_keys=False)
@@ -119,14 +134,22 @@ def load_dataset(csv_path=None, crop="cucumber"):
 
 
 def train_ridge(df, use_gbm_resid=False):
-    """TimeSeriesSplit + RidgeCV + 2 baseline. Метрики и веса."""
+    """TimeSeriesSplit + RidgeCV + 2 baseline. Метрики и веса.
+    Честная адаптация: полностью пустые признаки (import/курс/Ташкент, пока
+    нет источников) отбрасываются и логируются — модель учится на реальных данных.
+    """
     from sklearn.linear_model import RidgeCV
     from sklearn.preprocessing import StandardScaler
     from sklearn.model_selection import TimeSeriesSplit
-    df = df.dropna(subset=FEATURES + [TARGET]).reset_index(drop=True)
+    usable = [f for f in FEATURES if f in df.columns and df[f].notna().any()]
+    dropped = [f for f in FEATURES if f not in usable]
+    if not usable:
+        usable, dropped = list(FEATURES), []
+    df = df.dropna(subset=usable + [TARGET]).reset_index(drop=True)
     if len(df) < 30:
-        return {"status": f"need>=30 rows, have {len(df)}", "n": len(df)}
-    X = df[FEATURES].values
+        return {"status": f"need>=30 rows, have {len(df)}", "n": len(df),
+                "features_used": usable, "features_dropped": dropped}
+    X = df[usable].values
     y = df[TARGET].values
     tss = TimeSeriesSplit(n_splits=min(5, len(df) // 10))
     maes, maes_lag, maes_seas = [], [], []
@@ -147,11 +170,40 @@ def train_ridge(df, use_gbm_resid=False):
     mae = round(float(np.mean(maes)), 2)
     mae_lag = round(float(np.mean(maes_lag)), 2)
     beats = mae < mae_lag
+    # прогноз следующей недели: лаги сдвигаются от последних наблюдений
+    pred_next = None
+    try:
+        last = df.iloc[-1]
+        row = {f: float(last[f]) for f in usable}
+        w_next = float(last["week"]) + 1.0
+        row["sin_w"] = float(np.sin(2 * np.pi * w_next / 52.0))
+        row["cos_w"] = float(np.cos(2 * np.pi * w_next / 52.0))
+        row["price_lag1"] = float(last[TARGET])
+        row["price_lag2"] = float(last["price_lag1"])
+        if "import_m" in df.columns and len(df) >= 2:
+            v_new = df["import_m"].iloc[-1]
+            if not pd.isna(v_new):
+                row["import_lag2"] = float(v_new)
+            v_old = df["import_m"].iloc[-2]
+            if not pd.isna(v_old):
+                row["import_lag3"] = float(v_old)
+        if "kzt_rub" in df.columns:
+            v_k = df["kzt_rub"].iloc[-1]
+            if not pd.isna(v_k):
+                row["kzt_rub_lag1"] = float(v_k)
+        if "mean_price" in df.columns:
+            row["spread_lag1"] = float(last[TARGET]) - float(last["mean_price"])
+        row["holiday"] = 0.0  # будущий праздник неизвестен -> 0
+        Xn = sc.transform(pd.DataFrame([row])[usable].values)
+        pred_next = round(float(model.predict(Xn)[0]), 2)
+    except Exception:
+        pred_next = None
     out = {"status": "ok" if beats else "experimental:does-not-beat-lag",
            "n": len(df), "mae": mae, "mae_lag": mae_lag,
            "mae_seasonal": round(float(np.mean(maes_seas)), 2) if maes_seas else None,
-           "resid_std": round(resid_std, 2),
-           "coef": {k: round(float(v), 4) for k, v in zip(FEATURES, model.coef_)},
+           "resid_std": round(resid_std, 2), "pred_next": pred_next,
+           "features_used": usable, "features_dropped": dropped,
+           "coef": {k: round(float(v), 4) for k, v in zip(usable, model.coef_)},
            "intercept": round(float(model.intercept_), 2),
            "alpha": float(model.alpha_)}
     if use_gbm_resid:

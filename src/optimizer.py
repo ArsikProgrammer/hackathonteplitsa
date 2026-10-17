@@ -78,21 +78,31 @@ def optimize_night(night_rows, length=50.0, width=30.0, height=4.0, material="fi
     }
     screen = {"P1_flat": 1.0, "P2_econight": 1.0, "P3_screen": float(SCREEN_FACTOR)}
 
-    # почва: прогоняем simulate_no_heat чтобы оценить T_soil профиль
-    # если T_soil > T_target — почва отдаёт тепло, вычитаем из Q_need
+    # почва: профиль без отопления (ночь стартует от цели). Посчасовой вклад:
+    # почва теплее цели -> греет (вычитаем), холоднее -> забирает тепло (прибавляем).
+    hA = float(SOIL_HA_W_PER_K) * (length * width) / 1500.0
     try:
-        soil_rows = simulate_no_heat(night_rows, length, width, height, material)
-        hA = float(SOIL_HA_W_PER_K) * (length * width) / 1500.0
-        soil_gains = [max(0.0, hA * (r["T_soil"] - float(t_target))) for r in soil_rows]
-        avg_soil_gain = sum(soil_gains) / len(soil_gains) if soil_gains else 0.0
+        soil_rows = simulate_no_heat(night_rows, length, width, height, material,
+                                     t_in_start=float(t_target))
+        soil_T = [float(r["T_soil"]) for r in soil_rows]
+        noheat_t_in = [float(r["T_in"]) for r in soil_rows]
     except Exception:
-        avg_soil_gain = 0.0
+        soil_T = [None] * n
+        noheat_t_in = [float(r["T"]) if isinstance(r, dict) else float(r) for r in night_rows]
+
+    # риск «без отопления» — общий для всех профилей, база маржинального EV
+    hdd_noheat = hdd_deficit(noheat_t_in, t_crit)
+    p_noheat = freeze_risk(hdd_noheat)
 
     options = []
     for name, targ in profiles.items():
+        if soil_T[0] is None:
+            sg = 0.0
+        else:
+            sg = [hA * (ts - float(tt)) for ts, tt in zip(soil_T, targ)]
         need = heat_need_series(night_rows, targ, length, width, height, material,
                                 u_screen_factor=screen[name],
-                                soil_gain_W=avg_soil_gain)
+                                soil_gain_W=sg)
         q_peak = max([q["Q_W"] for q in need]) / 1000.0 if need else 0.0
         e_kwh = sum(q["Q_W"] for q in need) / 1000.0  # dt=1ч
         chk = boiler_check(q_peak, boiler_kw_max)
@@ -121,7 +131,7 @@ def optimize_night(night_rows, length=50.0, width=30.0, height=4.0, material="fi
         options.append({
             "name": name, "E_kwh": round(e_kwh, 1), "Q_peak_kw": round(q_peak, 1),
             "fuel_qty": fn["qty"], "fuel_unit": fn["unit"], "cost_tg": cost,
-            "hdd": hdd, "p_freeze": p,
+            "hdd": hdd, "p_freeze": p, "p_noheat": p_noheat,
             "loss_max_tg": loss_max, "ev_loss_tg": ev_loss,
             "loss_tg": ev_loss, "J_tg": J, "screen_fee_tg": screen_fee,
             "boiler": chk["note"], "start_at": start,
@@ -130,4 +140,5 @@ def optimize_night(night_rows, length=50.0, width=30.0, height=4.0, material="fi
     best = min(options, key=lambda o: o["J_tg"])
     saving = max(o["cost_tg"] for o in options) - best["cost_tg"]
     return {"options": options, "best": best, "saving_tg": round(saving, 0),
-            "t_crit": t_crit, "crop": crop, "fuel": fuel}
+            "t_crit": t_crit, "crop": crop, "fuel": fuel,
+            "p_noheat": p_noheat, "hdd_noheat": hdd_noheat}

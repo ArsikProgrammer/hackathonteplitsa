@@ -22,9 +22,11 @@ res = optimize_night(rows, g["length"], g["width"], g["height"], g["material"],
                      400.0, g["area_m2"], 10.0, 300.0, GAS_TARIFF_TG_M3)
 best = res["best"]
 d = decide_ev(best["cost_tg"], best["p_freeze"], best["loss_tg"],
-              0.0, 0, 0.85, v_gas_m3=best["fuel_qty"], profile=best["name"])
+              0.0, 0, 0.85, v_gas_m3=best["fuel_qty"], profile=best["name"],
+              p_noheat=res["p_noheat"])
 text, used = verbalize_v2(d, options=res["options"])
 print("BEST:", best)
 print("SAVING:", res["saving_tg"])
+print("P_NOHEAT:", res["p_noheat"], "HDD_NOHEAT:", res["hdd_noheat"])
 print("DECISION:", d)
 print("TEXT:", text, "| llm:", used)

@@ -74,7 +74,9 @@ def heat_need_series(t_out_series, t_target_series, length=50.0, width=30.0,
                      u_override=None, soil_gain_W=0.0, u_screen_factor=1.0):
     """Потребность Q_need(t) в Вт чтобы держать T_target(t).
 
-    t_target_series: список float или dict{T}. soil_gain вычитается (тепло почвы).
+    t_target_series: список float или dict{T}. soil_gain вычитается (тепло почвы,
+    может быть отрицательным — почва холоднее цели и забирает тепло -> нагрузка растет).
+    soil_gain_W: float или список почасовых значений (предпочтительно).
     u_screen_factor 0.6 = термоэкран (U*0.6).
     Возврат список {time, Q_W, dT}.
     """
@@ -91,6 +93,10 @@ def heat_need_series(t_out_series, t_target_series, length=50.0, width=30.0,
             continue
         G = loss_coef(length, width, height, material, base_n, wind, u_override)["G_W_per_K"]
         G *= float(u_screen_factor)
-        q = max(0.0, G * dT - float(soil_gain_W))
+        if isinstance(soil_gain_W, (list, tuple)):
+            sg = float(soil_gain_W[i]) if i < len(soil_gain_W) else 0.0
+        else:
+            sg = float(soil_gain_W)
+        q = max(0.0, G * dT - sg)
         out.append({"time": tm, "Q_W": round(q, 1), "dT": round(dT, 2)})
     return out
